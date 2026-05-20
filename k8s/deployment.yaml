@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retailpulse-deployment
+  labels:
+    app: retailpulse
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: retailpulse
+  template:
+    metadata:
+      labels:
+        app: retailpulse
+    spec:
+      containers:
+      - name: retailpulse
+        image: gcr.io/retailpulse/retailpulse:latest
+        ports:
+        - containerPort: 8501
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: retailpulse-config
+              key: db.host
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: retailpulse-config
+              key: db.port
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: retailpulse-config
+              key: redis.host
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: retailpulse-config
+              key: mlflow.uri
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: retailpulse-secrets
+              key: db_password
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+        - name: models
+          mountPath: /app/models_saved
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: retailpulse-data-pvc
+      - name: models
+        persistentVolumeClaim:
+          claimName: retailpulse-models-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retailpulse-service
+spec:
+  selector:
+    app: retailpulse
+  ports:
+  - port: 80
+    targetPort: 8501
+    protocol: TCP
+  type: LoadBalancer
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: retailpulse-data-pvc
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: retailpulse-models-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 20Gi

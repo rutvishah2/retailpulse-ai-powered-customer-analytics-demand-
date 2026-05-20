@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: retailpulse-postgres
+    environment:
+      POSTGRES_DB: retailpulse
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: retailpulse-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MLflow Tracking Server
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: retailpulse-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://admin:secure_password@postgres:5432/mlflow --default-artifact-root /mlflow/artifacts
+
+  # RetailPulse Dashboard
+  dashboard:
+    build: .
+    container_name: retailpulse-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: retailpulse
+      DB_USER: admin
+      DB_PASSWORD: secure_password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+      - ./models_saved:/app/models_saved
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+    command: streamlit run dashboard/app.py --server.port=8501 --server.address=0.0.0.0
+
+  # Training Job (optional, comment out to disable)
+  # trainer:
+  #   build: .
+  #   container_name: retailpulse-trainer
+  #   environment:
+  #     DB_HOST: postgres
+  #     MLFLOW_TRACKING_URI: http://mlflow:5000
+  #   volumes:
+  #     - ./data:/app/data:ro
+  #     - ./models_saved:/app/models_saved
+  #     - ./logs:/app/logs
+  #   depends_on:
+  #     - postgres
+  #     - mlflow
+  #   command: python train.py
+
+volumes:
+  postgres_data:
+  redis_data:
+  mlflow_data:
+
+networks:
+  default:
+    name: retailpulse-network
